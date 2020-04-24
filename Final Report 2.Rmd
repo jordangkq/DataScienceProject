@@ -1,0 +1,616 @@
+---
+title: "An Analysis of the Chapel Hill Police Department Arrest Records"
+author: "Mark Heymann, Jordan KongQuee, Anthony Lopiccolo, and Stephen Yan"
+date: "4/24/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message = F, warning = F, echo=FALSE}
+library(tidyverse)
+library(stringr)
+library(cluster)
+library(maps)
+library(proxy)
+library(grid)
+library(gridExtra)
+library(magrittr)
+library(multipanelfigure)
+library(factoextra)
+library(ggmap)
+library(jpeg)
+library(grid)
+library(foreign)
+library(nnet)
+library(ggplot2)
+library(reshape2)
+library(knitr)
+library(kableExtra)
+
+arrests <- read_csv2("policearrestsmade.csv")
+```
+
+```{r, echo=FALSE}
+arrests <- select(arrests,-`Incident Id`,-Zipcode,-Street,-`Time of Arrest`,-`Type of Arrest`,-`Drugs or Alcohol Present`, -`Weapon Present`,-`Disposition`)
+ arrests.1 <- mutate(arrests, Category = if_else(grepl("(?<!ABUSE[- ])AS.*LT|(?<!RO)(?!.*KILL)A[W]*DW|AWIK", `Primary Charge`, perl = TRUE), "ASSAULT",
+                      if_else(grepl("(?!.*TOOLS)BURG|BREAK.*ENTER|B&E|BREAKING", `Primary Charge`, perl = TRUE), "BURGLARY",
+                      if_else(grepl("(?<!B&E/)TRESPAS", `Primary Charge`, perl = TRUE), "TRESPASSING",
+                      if_else(grepl("(?<![AGT] )(?!.*INDE)CHILD|DOME.*ENCE|PROT.*RDER|NEGL.*INOR", `Primary Charge`, perl = TRUE), "DOMESTIC VIOLENCE",
+                      if_else(grepl("(LARCENY|THEFT|POSS).*(AUTO|VEHICLE|STOLEN CAR|MV)", `Primary Charge`), "MOTOR VEHICLE THEFT",
+                      if_else(grepl("MURDER|DEATH|(?!.*ANI)KILL", `Primary Charge`, perl = TRUE), "MURDER AND MANSLAUGHTER",
+                      if_else(grepl("ROBBERY", `Primary Charge`), "ROBBERY",
+                      if_else(grepl("(?<!G/)(?!.*(VEH|CAR$|MV))(?!.*MOB)(LARC|STOLEN)|CONCEAL.*(M.*D.*SE|GOODS)|(?<!I)SHOPLIFT|CARD THEFT|(?<!- )EMBE.*MENT|TOOL", `Primary Charge`, perl = TRUE), "LARCENY",
+                      if_else(grepl("SEX|INDECENT|RAPE|EXHIB", `Primary Charge`), "SEX OFFENSES",
+                      if_else(grepl("PEEP|STALK|COMM.*REAT|THR.*EN|HARASS|BULLY", `Primary Charge`, perl = TRUE), "STALKING AND THREATS",
+                      if_else(grepl("(?!.*OOL)(?<!DI)SCH|D(RU|UR)G|POSS.*[SN] [CO].*MISE|MARI[I]*J|COCA|ROIN|METH|SPICE|SIM.*OSS|MAINTAIN|PWISD|(?<!S)DELIVER|TOBA|W/S/D", `Primary Charge`, perl = TRUE), "DRUG/NARCOTIC VIOLATION",
+                      if_else(grepl("OPE.*NER|LIQ(OU|UO)R|(?<!CONCEALED AFTER )(?<!AFTER/WHILE )(?<!CCW AFTER )(?<!DRIVER )(?<!DRIVING AFTER )CONSUM|(?<!OF )ALCOHOLIC|UNDERAGE|TO INTOX|(?<!LARCENY OF ALCOHOLIC )BEV|(?<!-  )WINE|ALC.*ION|ALCOHOL PASSENGER", `Primary Charge`, perl = TRUE), "LIQUOR LAW VIOLATION",
+                      if_else(grepl("(?<!LR )IMPAIRED|(?<!W)DWI|DR.*CONS", `Primary Charge`, perl = TRUE), "DWI",
+                      if_else(grepl("CCW|WEAP(ONS|-)|CAR.*CONC|^DISCHARG|(?<![AT] )GUN|GOI.*ARM", `Primary Charge`, perl = TRUE), "ILLEGAL WEAPON VIOLATION",
+                      if_else(grepl("(?<!A)NDL|SPEED|(?<![LO] )(?<!Y OF )LICENSE|(?<!IMPAIRED )(?<!G WHILE )(?!.*(WHILE|AFTER))DRIVING|(?!.*TION)INSURANCE|DWLR|(?<!R )REGISTRATION|REVOK|SEAT BELT|FICT|FLO.*FIC|HIT|ATE.*VEH|IMP REG|ACCIDENT|USE.*ICLE|PASSENGER U|TAMP|LIGHT", `Primary Charge`, perl = TRUE), "DRIVING",
+                      if_else(grepl("(?<!A)I[\\.]*D[\\.]*(  M)*$|IDENTI|FRAUD-ID", `Primary Charge`, perl = TRUE), "ID FRAUD",
+                      if_else(grepl("TAXS|(?<!-)COUNTERF|FORGE|(?<!Y-)CREDIT|(?!.*(-| R))MON LAW|(?<!DE)(?!.*I[.]*D)FRAUD|CHECK|PRETE", `Primary Charge`,
+                                    perl = TRUE), "OTHER FRAUD",
+                      if_else(grepl("DAMAGE[- ]|COIN|VANDAL|LANDCAPE|ANTI[ S]", `Primary Charge`), "VANDALISM AND PROPERTY DAMAGE",
+                      if_else(grepl("NOISE|LOUD", `Primary Charge`), "NOISE COMPLAINT",
+                      if_else(grepl("HANDLING", `Primary Charge`), "PANHANDLING", "OTHER"))))))))))))))))))))) %>%
+                mutate(Date = `Date of Arrest`) %>%
+                separate(`Date of Arrest`, into = c("Year", "Month", "Day"), sep = "-") %>%
+                separate(latitude_longitude, into = c("Latitude", "Longitude"), sep = ",") %>%
+                mutate(City = if_else(grepl("\\bCH\\b|CH.[^R].*", City), "CHAPEL HILL", City)) %>%
+	    filter(City == "CHAPEL HILL") %>%
+                mutate(Month = str_replace_all(Month, "^0", "")) %>% 
+                mutate(Race = if_else(Race != "B" & Race != "A" & Race != "W" & !is.na(Race), "O", Race)) %>%
+  mutate_at(.vars=vars(Year,Month,Day),as.numeric) %>%     mutate_at(.vars=vars(Year,Month,Day),factor) %>%
+  mutate_at(.vars=vars(Latitude,Longitude), as.numeric) %>%
+  mutate(Gender = if_else(Gender == "F", "Female", if_else(Gender == "M", "Male", Gender))) %>%
+  mutate(Race = if_else(Race == "W", "White", if_else(Race == "B", "Black", if_else(Race == "A", "Asian", if_else(Race == "O", "Other", Race)))))
+```
+
+# Introduction
+
+This report details the findings of an analysis of police arrests in Chapel Hill between January 1, 2010 and August 26, 2019. Using data publicly available from the Chapel Hill Police Department, obtained via the Chapel Hill Public Library website, we were able to analyze trends in arrest type, location of arrest, and the demographic information about the arrested individual. Aside from providing interesting information about the nature of arrests in Chapel Hill during the majority of the preceding ten years, the data allows for prediction of the primary charge for which an individual may be arrested, given the arrestee's age, race, and gender.
+
+This specific project was of interest because the arrest incidents in Chapel Hill directly impact the lives of college students at the University of North Carolina at Chapel Hill, either directly or indirectly. Knowing the nature of arrests in Chapel Hill would be beneficial to these students, as well as to the larger community at UNC. Furthermore, because Chapel Hill is a college town, it was of interest to know if arrests associated with college students, including liquor law violations and noise complaints, were particularly prevalent.
+
+Upon considering the data available, the following questions were identified as capable and worthy of being answered.
+
+1. What are the most frequently observed arrest categories in Chapel Hill in the past decade? Furthermore, for any given arrest, how has the number of that type of arrest per year changed throughout time? What arrest categories are on the rise, on the decline, and staying constant?
+
+2. What is the distribution of arrests throughout the calendar year? Are certain months in the year more prone to arrests? Do arrests, or specific arrests, occur more often on certain days in the year, such as on holidays or during college-celebrated events?
+
+3. Are there associations between types of arrests and the demographic information about the individual arrested? If the age, race, and gender of a person are known, assuming that the person is arrested, could the person's probabilities of being arrested for each arrest category be predicted?
+
+4. Are there areas in Chapel Hill that are more prone to arrests than others? If so, could these areas be classified into distinct clusters?
+
+The following report details the methods used and the results obtained in pursuit of answers to the above questions. Briefly, the answers are sketched below.
+
+1. The most common arrest categories are liquor law violations, drug and narcotic violations, and DWI arrests. In general, there are no blatantly obvious trends with regard to each of the arrest categories throughout time, with one exception. Aside from natural yearly variation, most arrest categories remained relatively consistent in prevalence. However, there is an evident downward trend in the number of liquor law violation arrests from 2010 through 2018.
+
+2. In general, less arrests take place during the winter months than during the summer months. Furthermore, there are evident spikes in the number of arrests that take place at the end of the months of April and August. Notably, these two time periods correspond to the end and the beginning of the UNC academic year, respectively. Aside from these larger trends, several specific days in the year exhibit notably different numbers of arrests. For example, Christmas Day, along with the days immediately preceding and following it, feature comparatively few arrests, while more arrests occur on New Year's Day than on the typical day.
+
+3. Roughly equal numbers of black and white people were arrested, and many more men were arrested than women. Additionally, the ages of the arrestees were skewed, with more younger people arrested. There do appear to be significant associations between arrest types and the demographic information about the individual arrested. For example, noise complaint arrests were heavily focused on people in their twenties, while panhandling arrests were disproportionately less common among people in their twenties. Moreover, we generated a model that can predict the probabilities that a person of a given age, race, and gender would be arrested for each of the 21 arrest categories.
+
+4. There do not appear to be specific hotspots of arrests within Chapel Hill. Rather, the arrests appear to be roughly uniformly distributed within the Chapel Hill town limits. However, we used a clustering model to group the arrests into clusters, based on the geographic location of the arrest and on the arrest category.
+
+
+# Data Description and Exploration
+
+The specific dataset used in this analysis contains records of every arrest in Chapel Hill during the aforementioned time period. For each arrest, the following variables were recorded. See the notes below for a description of each variable.
+
++ Primary charge: the primary charge for which the individual was arrested
++ City: the city in which the arrest took place
++ State: the state in which the arrest took place
++ Date of arrest: the date of the arrest
++ Age: the age of the individual arrested
++ Race: the race of the individual arrested
++ Gender: the gender of the individual arrested
++ Ethnicity: the ethnicity of the individual arrested
++ Latitude and longitude: the latitude and longitude of the scene of the arrest
+
+In addition to these variables, the following variables were also recorded in the dataset, although they were not used in the analysis.
+
++ Incident ID: a numeric code representing the arrest
++ Primary charge: the primary charge for which the individual was arrested
++ Street: the street address of the scene of the arrest
++ City: the city in which the arrest took place
++ State: the state in which the arrest took place
++ Zip code: the zip code in which the arrest took place
++ Date of arrest: the date of the arrest
++ Time of arrest: the time of the arrest
++ Age: the age of the individual arrested
++ Race: the race of the individual arrested
++ Gender: the gender of the individual arrested
++ Ethnicity: the ethnicity of the individual arrested
++ Type of arrest: the type of arrest, either on view, summoned/cited, or taken into custody
++ Drugs or alcohol present: a binary variable indicating whether drugs or alcohol were present at the scene of the arrest
++ Weapon present: whether a weapon was present at the scene of the arrest, and if so, the type of weapon
++ Disposition: the disposition, either cleared by arrest or arrest/no investigation
++ Latitude and longitude: the latitude and longitude of the scene of the arrest
+
+Before conducting our analysis, however, we added one new variable to the dataset. Based on the primary charge recorded, we reclassified each arrest in the dataset into one of 21 categories, which were largely determined based on the FBI Uniform Crime Reporting arrest categories. In addition to the categories prescribed by the FBI, we also included several other categories of interest that appeared regularly in the dataset, including noise complaints, panhandling, driving violations, and DWI arrests. This further classification allowed for the above questions to be answered more easily, and the categories are outlined below.
+
++ Arson
++ Assault
++ Burglary
++ Domestic violence
++ Driving violations
++ Drug and narcotic violations
++ DWI
++ ID fraud
++ Illegal weapon violations
++ Larceny
++ Liquor law violations
++ Motor vehicle theft
++ Murder and manslaughter
++ Noise complaints
++ Other fraud
++ Panhandling
++ Robbery
++ Sex offenses
++ Stalking and threats
++ Trespassing
++ Vandalism and property damage
++ Other
+
+To prepare the data for the analytical methods below, several adjustments needed to be made to the dataset. First, the unused variables listed above were removed, and some of the variables that were used were altered. For example, the latitude and longitude variable was separated into two different variables, one for latitude and one for longitude. Similarly, the date of arrest variable was separated into three variables, one each for the month, the day, and the year of the arrest. Additionally, the data types were adjusted accordingly, from numbers to factors in some cases.
+
+Several misspellings of Chapel Hill were present in the city variable, so these misspellings were corrected. Strangely, although the vast majority of the arrests in the dataset were identified as having taken place in Chapel Hill, a handful had other cities listed. For example, the city variable included cities other than Chapel Hill, ranging from Carrboro and Mebane to Greensboro and Charlotte. Some of the cities listed belonged to states other than North Carolina as well, including an arrest in Fairfax, Virginia and one in Conway, South Carolina. The reason that arrests that took place in these disparate cities were included in the Chapel Hill arrest records dataset was not immediately clear. To remove this uncertainty, we deleted all arrests that did not have Chapel Hill listed as the city from the data used in the analysis.
+
+Finally, and most substantively, the category variable was formed using a series of regular expressions applied to the primary charge variable. One such regular expression, used to create the driving violation category, is written below.
+
+```{r, eval=FALSE}
+(?<!A)NDL|SPEED|(?<![LO] )(?<!Y OF )LICENSE|(?<!IMPAIRED )(?<!G WHILE )(?!.*(WHILE|AFTER))DRIVING|(?!.*TION)INSURANCE|DWLR|(?<!R )REGISTRATION|REVOK|SEAT BELT|FICT|FLO.*FIC|HIT|ATE.*VEH|IMP REG|ACCIDENT|USE.*ICLE|PASSENGER U|TAMP|LIGHT
+```
+
+A subset of the data after the above changes were made appears below.
+
+```{r, echo=FALSE}
+#head(arrests.1, n = 3)
+knitr::kable(arrests.1[1:5,], align = "lccll", caption = "Chapel Hill Arrests") %>%
+  kable_styling(bootstrap_options = c("striped", "condensed"), font_size = 12, full_width = T, position = "left")
+```
+
+# Results
+
+This section details the methods and results obtained in an attempt to answer the previously stated questions. Although not all methods were successful, we were nonetheless able to obtain some interesting insights.
+
+#### Question 1
+
+***What are the most frequently observed arrest categories in Chapel Hill in the past decade? Furthermore, for any given arrest, how has the number of that type of arrest per year changed throughout time? What arrest categories are on the rise, on the decline, and staying constant?***
+
+Our first approach to answering this question was to determine the most common primary charge categories, as previously created from the primary charge variable, over all years represented in the dataset. The following table displays the number of instances of arrests in Chapel Hill for each category from January 1, 2010 to August 26, 2019.
+
+```{r, echo=FALSE}
+table2 <- arrests.1 %>% count(Category) %>% arrange(desc(n)) %>% rename("Number of Arrests" = n)
+
+kable(table2, caption = "Number of Arrests by Category") %>% 
+ kable_styling(bootstrap_options = c("striped", "condensed"), font_size = 12, full_width = T, position = "left")
+```
+
+As is evident in the table, the most common arrest category, aside from the other category, is liquor law violations, followed by drug and narcotic violations, DWIs, assaults, and larceny arrests, all of which occurred more than 1,000 times. It is significant that liquor law violations comprise such a large percentage of arrests in Chapel Hill. Given the fact that Chapel Hill is a college town, which tends to feature a large number of underage drinking and similar arrests, this result is perhaps not surprising. On the other hand, the least common arrests were those categorized as murder and manslaughter, motor vehicle theft, domestic violence, and robbery. Given the violent nature of these arrests, their lesser frequency would be comforting to the UNC student body and to the Chapel Hill community at large.
+
+The above table displays the total number of arrests for each category regardless of the year in which the arrest took place. We next consider the trend of all arrests throughout time, specifically whether or not arrests have exhibited a rising or falling pattern throughout the past decade. First, because the dataset did not contain a full year's worth of arrest data for 2019, this year was excluded in the following analyses.
+
+```{r, echo = FALSE, fig.width = 10}
+group_by(arrests.1,Year) %>%
+  filter(n() > 100,Year!=2019) %>%
+  ggplot(aes(x = Year, fill = Category)) + geom_bar() +  theme(axis.text.x = element_text(angle = 90)) +
+  scale_color_brewer(type = "div", palette = "BrBG") +
+  ggtitle("Number of Arrests by Year & Category") + ylab("Number of Arrests") +theme_bw()
+```
+
+As is evident in the bar chart above, which tracks the number of arrests made as a function of time, 2010, 2011, and 2015 featured larger numbers of arrests, while 2017 and 2018 featured fewer arrests. Although it is difficult to decipher a trend within the nine years in the chart, it is notable that the two years with the fewest recorded arrests were the two most recent years with full data available. Moving into the future, it will be interesting to determine if the annual number of arrests will remain lower than it has been in the past, or if these two years simply represent an anomaly. The bar chart also breaks the total number of arrests in a given year into each of the 21 categories. To better track the occurrence of arrests pertaining to these categories throughout time, we next separate out these categories.
+
+```{r, echo=FALSE}
+  p1 <- filter(arrests.1, Category %in% c("LIQUOR LAW VIOLATION", "DRUG/NARCOTIC VIOLATION", "DWI", "ASSAULT",  "LARCENY", "TRESPASSING"))  %>%
+    count(Year, Category) %>%
+      filter(Year != 2019) %>%
+        ggplot(aes(x = Year, y = n, group = Category, color = Category)) + geom_line() + theme_bw() + ggtitle("Top Six Charges") + ylab("Number of Arrests")
+
+  p2<- filter(arrests.1, Category %in% c("MURDER AND MANSLAUGHTER", "MOTOR VEHICLE THEFT", "DOMESTIC VIOLENCE", "NOISE COMPLAINT", "SEX OFFENSES", "ROBBERY")) %>%
+    count(Year, Category) %>%  
+      filter(Year != 2019) %>%
+        ggplot(aes(x = Year, y = n, group = Category, color = Category)) + geom_line() + theme_bw() + ggtitle("Bottom Six Charges") + ylab("Number of Arrests")
+grid.arrange(p1, p2, ncol = 1)
+```
+
+The first chart above depicts the total number of arrests belonging to each of the top six most common arrest categories as a function of time. Each line represents one of the six categories. Although assault, drug and narcotic violation, DWI, larceny, and trespassing arrests remained relatively constant throughout the years, there is an apparent marked decrease in the number of liquor law violation arrests since 2010. In particular, the number of such arrests halved, from around 450 in 2010 to only around 225 in 2018. Between these years, from 2011 through 2016, the number of liquor law violation arrests remained relatively constant, with between roughly 250 and 350 arrests of this type per year. It appears, then, that the dramatic decrease in these arrests in 2017 and 2018 was the leading factor in the overall number of arrests decreasing during these two years, noted above. For any given year, liquor law violations are the most common arrest category, but the relative standing among the other five categories varies, although larceny and trespassing are always the two least common categories from these six. The other three are tightly bunched together.
+
+Beyond these top six categories, the remaining 15 arrest categories occurred for the most part no more than 50 times per year, justifying the choice of displaying only the top six categories in the first chart. The second chart depicts the same information as the first one, but for the six least common arrest categories instead. As can be observed by viewing the scale on the vertical axis, each of these arrest categories occurs in small numbers each year. As a result, we see wild swings in the relative position of the six arrest categories for each year. The trends in these six categories are representative of those in the remaining nine categories, all of which display rapid fluctuation between small numbers throughout time. Analyzing these charts together, we can deduce that the arrest categories that are worthy of a deeper analysis are those shown in the first chart, primarily because trends are easier to identify for more recurrent categories.
+
+In summary, the most significant trend between the years 2010 and 2018 was the decline in liquor law violation arrests in 2017 and 2018, which appears to have been the driving factor in the overall decline in arrests for these years. Most other arrest categories remained relatively flat. This same trend was also observed in the middle nine arrest categories, not shown for the sake of avoiding repetition. Aside from these trends, or lack thereof, the most common arrest category by far was liquor law violation arrests, with mostly nonviolent arrest categories rounding out the top six.
+
+#### Question 2
+
+***What is the distribution of arrests throughout the calendar year? Are certain months in the year more prone to arrests? Do arrests, or specific arrests, occur more often on certain days in the year, such as on holidays or during college-celebrated events?***
+
+First, we take a large-scale approach to answering this question, focusing on the number of arrests in each month. The following bar chart shows the total number of arrests across all years for each of the twelve months of the year.
+
+```{r, echo=FALSE}
+ mutate_at(arrests.1, c("Year", "Month", "Day"), as.numeric) %>%
+    mutate_at(c("Year", "Month", "Day"), factor) %>%
+      filter(Year != 2019) %>%
+        group_by(Month) %>%
+          summarise(n = n()) %>%
+            mutate(Proportion = n/sum(n)) %>% 
+              ggplot(aes(x = Month, y = n)) + geom_col(fill="dodgerblue4") + ggtitle("Arrests by Month") + ylab("Number of Arrests") + theme_bw()
+```
+
+There are two points of interest in the graph. First, the monthly number of arrests during the winter months, from November to February, is noticeably lower than that for the rest of the year. The number of arrests during the winter months ranges from 1,000 to 1,250, whereas from March to October (excluding August), there are between 1,250 and 1,500 monthly arrests. Specifically, the monthly number of arrests decreases from September to December and rises from January to April. This trend reveals that Chapel Hill follows the nationwide trend of comparatively heightened arrests during the warmer months.
+
+Second, the number of arrests in August is disproportionately high. We look specifically at each day within each month to attempt to provide an explanation for the August anomaly, as well as to identify trends that occur on specific days, such as on holidays, in the year. The series of twelve graphs below depicts the total number of arrests on each day of the year, separated by month. Each month is identified by the number of the month in the calendar year.
+
+```{r, echo=FALSE}
+  plots = vector(mode = "list", length = 12)
+  
+  for (i in 1:12) {
+    p <- filter(arrests.1, Year != 2019, Month == as.character(i)) %>%
+      group_by(Day) %>%
+        summarise(n = n()) %>%
+            ggplot(aes(x = Day, y = n)) + geom_col(fill = "dodgerblue3") + ggtitle(as.character(i)) + ylim(0, 100) + ylab("Number of Arrests") + theme_bw() + ggtitle(month.name[i])
+    plots[[i]] = p
+  }
+
+```
+
+```{r,fig.width = 15,fig.height=10, warning=FALSE, echo=FALSE}
+figure1 <- multi_panel_figure(columns = 2, rows = 2, panel_label_type = "none")
+
+figure1 %<>%
+  fill_panel(plots[[1]], column = 1, row = 1) %<>%
+  fill_panel(plots[[2]], column = 2, row = 1) %<>%
+  fill_panel(plots[[3]], column = 1, row = 2) %<>%
+  fill_panel(plots[[4]], column = 2, row = 2) 
+figure1
+
+figure2 <- multi_panel_figure(columns = 2, rows = 2, panel_label_type = "none")
+figure2 %<>%
+ fill_panel(plots[[5]], column = 1, row = 1) %<>%
+  fill_panel(plots[[6]], column = 2, row = 1) %<>%
+  fill_panel(plots[[7]], column = 1, row = 2) %<>%
+   fill_panel(plots[[8]], column = 2, row = 2) 
+figure2
+
+figure3 <- multi_panel_figure(columns = 2, rows = 2, panel_label_type = "none")
+figure3 %<>%
+ fill_panel(plots[[9]], column = 1, row = 1) %<>%
+  fill_panel(plots[[10]], column = 2, row = 1) %<>%
+  fill_panel(plots[[11]], column = 1, row = 2) %<>%
+   fill_panel(plots[[12]], column = 2, row = 2) 
+figure3
+```
+
+From the above graphs, we can see that the daily number of arrests tends to increase at the end of April and at the end of August. Interestingly, these two time periods represent the end and the beginning of the school year at UNC, respectively. From this observation, it can be surmised that perhaps the arrival and impending departure of students in Chapel Hill leads to an increase in arrests.
+
+Secondly, a number of trends around specific notable days in the year are visible. For example, a dip is apparent in arrests around the Christmas holiday, with December 25 being home to the fewest number of arrests of any day in the year, with the exception of February 29, which only occurs once every four years. Moreover, Christmas Eve and the day after Christmas featured few arrests as well. This lack of arrest activity around Christmas could either be seen as surprising or unsurprising. On one hand, many people spend the day with their families at home, reducing the amount of illegal activity taking place outside the home. In addition, the good cheer of the holiday spirit could also contribute to the relative lack of illegal activity, as individuals forego violence, theft, and drug and alcohol violations for the warmth of the holiday. On the other hand, celebratory holidays, which include Christmas, are sometimes associated with higher arrest rates, and a large number of people travel around the holiday, potentially leading to an increase in driving violation arrests.
+
+With regard to other holidays, New Year's Day, January 1, is home to the largest number of arrests in the month of January, perhaps a result of increased DWI and other similar arrests related to disorderly conduct and drunkenness. Surprisingly, few arrests occurred on Halloween, but November 1, the following day, is among the top three arrest days in November, perhaps as a result of lingering illegal activity from the previous day. Other holidays, like the Fourth of July, do not stand out from the prevailing monthly trends during the corresponding time of year. The following tables categorize the arrests on Christmas and on New Year's Day by arrest category. We further wanted to explore our theories as to the types of crimes being committed on these days.
+
+```{r, echo=FALSE}
+table3 <- filter(arrests.1, Month == 12, Day == 25) %>% group_by(Category) %>% summarize(n = n()) %>% arrange(desc(n)) %>% as.data.frame() %>% rename("Number of Arrests" = n)
+
+kable(table3, caption = "Arrests by Category on Christmas") %>% 
+ kable_styling(bootstrap_options = c("striped", "condensed"), font_size = 12, full_width = T, position = "left")
+
+table4 <- filter(arrests.1, Month == 1, Day == 1) %>% group_by(Category) %>% summarize(n = n()) %>% arrange(desc(n)) %>% as.data.frame() %>% rename("Number of Arrests" = n)
+
+kable(table4, caption = "Arrests by Category on New Year's Day") %>% 
+ kable_styling(bootstrap_options = c("striped", "condensed"), font_size = 12, position = "left")
+```
+
+Although we hypothesized that driving arrests may have been common on Christmas Day, in fact, no such arrests were made between Christmas 2010 and Christmas 2018. Instead, nine of the eleven arrests were either DWI arrests or drug and narcotic violation arrests. Furthermore, DWI and liquor law violation arrests were common on New Year's Day, as hypothesized, but neither category was as common as assault arrests or other arrests.
+
+To determine the breakdown of the late April and late August spike in arrests, we next consider the daily number of liquor law violation arrests in isolation for these months. The first two graphs below show daily liquor law arrests for April and August, and the bottom two graphs show all arrests except liquor law arrests.
+
+```{r, echo=FALSE}
+  plots1 = vector(mode = "list", length = 12)
+
+  for (i in 1:12) {
+    p <- filter(arrests.1, Year != 2019, Category == "LIQUOR LAW VIOLATION", Month == as.character(i)) %>%
+      group_by(Day) %>%
+        summarise(n = n()) %>%
+            ggplot(aes(x = Day, y = n)) + geom_col(fill = "dodgerblue") + ggtitle(as.character(i)) + ylim(0, 50) + ylab("Number of Arrests") + theme_bw() + ggtitle(month.name[i])
+    plots1[[i]] = p
+  }
+```
+
+```{r,fig.width = 15,fig.height=5, warning=FALSE, echo=FALSE}
+figure4 <- multi_panel_figure(columns = 2, rows = 1, panel_label_type = "none")
+
+figure4 %<>%
+  fill_panel(plots1[[4]], column = 1, row = 1) %<>%
+  fill_panel(plots1[[8]], column = 2, row = 1)
+figure4
+```
+
+```{r, echo=FALSE}
+  plots2 = vector(mode = "list", length = 12)
+  
+  for (i in 1:12) {
+    p <- filter(arrests.1, Year != 2019, Category != "LIQUOR LAW VIOLATION", Month == as.character(i)) %>%
+      group_by(Day) %>%
+        summarise(n = n()) %>%
+            ggplot(aes(x = Day, y = n)) + geom_col(fill = "cornflowerblue") + ggtitle(as.character(i)) + ylim(0, 50) + ylab("Number of Arrests") + theme_bw() + ggtitle(month.name[i])
+    plots2[[i]] = p
+  }
+```
+
+```{r,fig.width = 15,fig.height=5, warning=FALSE, echo=FALSE}
+figure6 <- multi_panel_figure(columns = 2, rows = 1, panel_label_type = "none")
+
+figure6 %<>%
+  fill_panel(plots2[[4]], column = 1, row = 1) %<>%
+  fill_panel(plots2[[8]], column = 2, row = 1)
+figure6
+```
+
+From the first two graphs above, we can see that liquor law violation arrests follow the same pattern as overall arrests: increasing dramatically at the ends of April and August. With the second pair of graphs, we attempt to determine if liquor law violation arrests alone are the leading factor in the month-end increase in arrests. As seen above, removing liquor law violation arrests for April and August removes the vast majority of day-to-day variability in the number of arrests. Although only two months are shown here, with two more being shown later, the same trend was seen in all twelve months. Specifically, with regard to April and August, controlling for liquor law violation arrests, we see no meaningful spike in arrests at the ends of these months. We can therefore conclude that liquor law violation arrests are the driving factor in the increase in arrests at the ends of April and August. This conclusion makes sense, as many UNC students celebrate their departure from and arrival at campus by throwing parties, one source of liquor law violations. 
+
+We next proceed to the months of October and November to see if liquor law violation arrests increase on Halloween or on the following day. We noted earlier that overall arrests spiked on November 1, and it would be reasonable to surmise that many of these arrests were related to alcohol. The following four graphs show arrest tallies for each day in October and November, the first two showing arrest tallies only for liquor law violation arrests, and the second two showing arrest tallies for all categories except liquor law violations.
+
+```{r,fig.width = 15,fig.height=5, warning=FALSE, echo=FALSE}
+figure4 <- multi_panel_figure(columns = 2, rows = 1, panel_label_type = "none")
+
+figure4 %<>%
+  fill_panel(plots1[[10]], column = 1, row = 1) %<>%
+  fill_panel(plots1[[11]], column = 2, row = 1)
+figure4
+```
+
+```{r,fig.width = 15,fig.height=5, warning=FALSE, echo=FALSE}
+figure6 <- multi_panel_figure(columns = 2, rows = 1, panel_label_type = "none")
+
+figure6 %<>%
+  fill_panel(plots2[[10]], column = 1, row = 1) %<>%
+  fill_panel(plots2[[11]], column = 2, row = 1)
+figure6
+```
+
+Surprisingly, there is no surge in liquor law arrests on either October 31 or November 1, meaning that the November 1 arrest peculiarity must be explained by an increase in some other category of arrest. However, the day before Halloween, October 30, saw over 40 liquor law arrests, a number which towers over the overall yearly trend of around 10 such arrests per day. Moreover, the three days with large arrest tallies in October are no different from the rest of the month when liquor law arrests are excluded.
+
+In summary, arrests generally occur more often during the summer than during the winter. The months of April and August feature unusual trends at the ends of the months, with a larger than normal number of arrests occurring during these times. This effect is driven by a large increase in liquor law violation arrests, which occur during the bookend periods of the academic year at UNC. On a daily level, arrests drop precipitously around Christmas, while they increase on New Year's Day and around Halloween. These trends suggest that arrest activity is not uniform across the year and that preconceived notions of arrest trends--such as their increase during the summer or on some holidays--are in fact realized in Chapel Hill.
+
+#### Question 3
+
+***Are there associations between types of arrests and the demographic information about the individual arrested? If the age, race, and gender of a person are known, assuming that the person is arrested, could the person's probabilities of being arrested for each arrest category be predicted?***
+
+First, we provide a baseline summary of the demographic information for the people arrested in Chapel Hill between January 1, 2010 and August 26, 2019. The following two bar charts apportion the arrests in this time span by race and by gender, respectively, and display the number of arrests belonging to each race and gender category. 
+
+```{r, echo=FALSE}
+  arrest_race <- count(arrests.1, Race) %>%
+    ggplot(aes(x = Race, y = n)) + geom_col(fill="cyan4") + ggtitle("Arrests by Race") + ylab("Number of Arrests") + theme_bw()
+```
+
+```{r, echo=FALSE}
+ arrest_gender <- count(arrests.1, Gender) %>%
+    ggplot(aes(x = Gender, y = n)) + geom_col(fill="cyan4") + ggtitle("Arrests by Gender") + ylab("Number of Arrests") + theme_bw()
+```
+
+```{r,fig.width = 15,fig.height=5, warning=FALSE, echo=FALSE}
+figure4 <- multi_panel_figure(columns = 2, rows = 1, panel_label_type = "none")
+
+figure4 %<>%
+  fill_panel(arrest_race, column = 1, row = 1) %<>%
+  fill_panel(arrest_gender, column = 2, row = 1)
+figure4
+```
+
+From these charts, the number of black people and the number of white people arrested were roughly equal, with few Asian people arrested. Roughly 1,000 arrestees did not have a race indicated. These figures stand in the face of the racial makeup of Chapel Hill, which, as of the 2010 Census, was 72.8 percent white and only 9.7 percent black. It should be noted that not all arrestees in Chapel Hill are residents of Chapel Hill, but nevertheless, a disproportionate number of people arrested were black. Moreover, approximately four times as many males were arrested as females, with again around 1,000 arrestees not having a gender indicated. Once more, arrests are not proportionate among gender lines.
+
+We next analyze the distribution of the ages of people arrested in Chapel Hill. Below is a histogram displaying these ages.
+
+```{r, warning=FALSE, echo=FALSE}
+  ggplot(arrests.1, aes(x= Age)) + geom_histogram(bins = 25, fill="cyan3", color = "darkcyan") + ggtitle("Arrests by Age") + theme_bw()
+```
+
+Two interesting trends appear above. First, the ages of the arrestees are skewed, with many more younger people arrested than middle-aged or older people. Second, the distribution appears bimodal, with one peak around age 20 and a second peak around age 50. The peak around age 50, however, is much smaller than that around age 20. Between these two ages, especially between ages 30 and 40, comparatively few people were arrested, and very few people older than age 60 were arrested. This distribution is not surprising in face of the fact that Chapel Hill is a college town, with a large population of students between the ages of 18 and 22. The age breakdown of the Chapel Hill population, per the 2010 Census, is detailed below.
+
+```{r, echo=FALSE}
+  age <- c("18 - 24", "25 - 44", "45 - 64", "65 and above")
+  pop <- c("38.1%", "28.6%", "22.3%", "11.1%")
+  b <- filter(arrests.1, Age >= 18, Age <= 24) %>% nrow
+  c <- filter(arrests.1, Age >= 25, Age <= 44) %>% nrow
+  d <- filter(arrests.1, Age >= 45, Age <= 64) %>% nrow
+  e <- filter(arrests.1, Age >= 65) %>% nrow
+  arr <- c((b/(b+c+d+e))*100, (c/(b+c+d+e))*100, (d/(b+c+d+e))*100, (e/(b+c+d+e))*100) %>% round(digits = 1) %>% as.character %>% paste("%", sep="")
+  t = tibble(age, pop, arr) %>%
+    pivot_longer(c(pop, arr), names_to = "data", values_to = "prop")
+  
+  ggplot(t, aes(x = age, y = prop, group = data, fill = data)) + geom_col(position = "dodge") + ggtitle("Age Distributions in Chapel Hill Arrest Record and Census") + theme_bw() + xlab("Age") + ylab("Proportion") + scale_fill_discrete(name = "Data", labels = c("Arrest Record", "Census")) + geom_text(aes(label = prop), position=position_dodge(width=0.9), vjust=-0.25)
+```
+
+As can be seen above, despite the large number of young people arrested in the histogram, people between the ages of 18 and 24 were arrested slightly disproportionately less than their share of the population would suggest. Moreover, although it appears from the histogram that those between the ages of 25 and 44 did not represent as many arrests, they were arrested disproportionately more than their share of the population would suggest. Finally, those age 65 or older, who make up 11.1 percent of the over-18 population, represented only 1.9 percent of arrests.
+
+Having analyzed the overall ages of the people arrested, we next consider whether certain arrest categories have different age distributions. The six histograms below display the age distribution for each of six arrest categories.
+
+```{r, warning=FALSE, echo=FALSE}
+a1 <- arrests.1 %>%
+        filter(Category == "DRUG/NARCOTIC VIOLATION") %>%
+        ggplot(aes(x= Age)) + geom_histogram(bins = 25, fill="coral2", color = "coral4") + ggtitle("DRUG/NARCOTIC VIOLATION") + theme_bw()
+
+a2 <- arrests.1 %>%
+        filter(Category == "LIQUOR LAW VIOLATION") %>%
+        ggplot(aes(x= Age)) + geom_histogram(bins = 25, fill="coral2", color = "coral4") + ggtitle("LIQUOR LAW VIOLATION") + theme_bw()
+
+a3 <- arrests.1 %>%
+        filter(Category == "DRIVING") %>%
+        ggplot(aes(x= Age)) + geom_histogram(bins = 25, fill="coral2", color = "coral4") + ggtitle("DRIVING") + theme_bw()
+
+a4 <- arrests.1 %>%
+        filter(Category == "ASSAULT") %>%
+        ggplot(aes(x= Age)) + geom_histogram(bins = 25, fill="coral2", color = "coral4") + ggtitle("ASSAULT") + theme_bw()
+
+a5 <- arrests.1 %>%
+        filter(Category == "PANHANDLING") %>%
+        ggplot(aes(x= Age)) + geom_histogram(bins = 25, fill="coral2", color = "coral4") + ggtitle("PANHANDLING") + theme_bw()
+
+a6 <- arrests.1 %>%
+        filter(Category == "NOISE COMPLAINT") %>%
+        ggplot(aes(x= Age)) + geom_histogram(bins = 25, fill="coral2", color = "coral4") + ggtitle("NOISE COMPLAINT") + theme_bw()
+```
+
+```{r,fig.width = 15,fig.height=10, warning=FALSE, echo=FALSE}
+figure6 <- multi_panel_figure(columns = 3, rows = 2, panel_label_type = "none")
+
+figure6 %<>%
+  fill_panel(a1, column = 1, row = 1) %<>%
+  fill_panel(a2, column = 2, row = 1) %<>%
+  fill_panel(a3, column = 3, row = 1) %<>%
+  fill_panel(a4, column = 1, row = 2) %<>%
+  fill_panel(a5, column = 2, row = 2) %<>%
+  fill_panel(a6, column = 3, row = 2)
+figure6
+```
+
+Evidently, the age distribution is not consistent across different arrest categories. Perhaps most striking of the above histograms is that for noise complaints. This distribution is heavily centralized around the traditional college ages, which follows from the fact that college students are most likely to throw loud parties for which a noise complaint would be received. On the other hand, the distribution of panhandling arrests is significantly different from the overall distribution, with a more unimodal shape centered around age 50. This result is logical, as panhandling is specifically unassociated with college students. The other distributions more closely follow the overall distribution of ages. Drug and narcotic violation arrests have a mode in the low twenties and then taper off as age increases. Liquor law violation arrests have a similar mode, but it also features a second, smaller mode around the age of 50. Driving violations and assaults are more centralized in the mid-20s but follow a similar tendency to taper off. Many of the other arrest categories not depicted above featured distributions similar to the overall distribution.
+
+Next, we run a multinomial logistic regression model on the arrest dataset, attempting to predict the arrest category using the age, race, and gender of the person arrested as predictors. The code used to generate this model is displayed below. Before running the model, one primary adjustment was needed to the dataset. Several arrests did not provide the arrestee's race, gender, or age. All such observations were discarded, as values for these three variables in all observations were needed to run the model. Furthermore, the other category was chosen as the reference level as a result of it representing nothing more than all arrests that did not fit into one of the other categories.
+
+```{r, echo = FALSE}
+arrests.2 <- mutate(arrests.1, Race=if_else(is.na(Race),"U",Race)) %>%
+   mutate(Gender = if_else(is.na(Gender),"U",Gender)) %>%
+   mutate(Ethnicity = if_else(is.na(Ethnicity),"U",Ethnicity))
+arrests.2 <- filter(arrests.2, Race != "U", Gender != "U", !is.na(Age))
+
+arrests.2 <- mutate(arrests.2, Category = as.factor(Category))
+```
+
+```{r}
+arrests.2$Category2 <- relevel(arrests.2$Category, ref = "OTHER")
+test <- multinom(Category2 ~ Age + Race + Gender, data = arrests.2, maxit = 500)
+```
+
+Having run the model, we interpret its results by considering the probability that each combination of race, gender, and age is arrested for each arrest category. Naturally, the probabilities for a single race, gender, and age combination across all arrest categories sum to one. The code below performs this step.
+
+```{r}
+dage <- data.frame(Race = rep(c("Black", "White"), each = 106), Gender = c(rep(c("Male", "Female"), each = 53), rep(c("Male", "Female"), each = 53)), Age = rep(c(18:70), 4))
+pp.age <- cbind(dage, predict(test, newdata = dage, type = "probs", se = TRUE))
+lpp <- melt(pp.age, id.vars = c("Race", "Gender", "Age"), value.name = "probability")
+```
+
+To visually analyze the probabilities computed above, we proceed by displaying six charts, one for each of six arrest categories. Each chart displays the probability, according to the model, that an arrested person of a given age, race, and gender is arrested for the crime category listed.
+
+```{r, echo = FALSE}
+p1 <- filter(lpp, variable == "DRUG/NARCOTIC VIOLATION") %>% ggplot(aes(x = Age, y = probability, color = Race, linetype = Gender)) + geom_line() + ggtitle("DRUG/NARCOTIC VIOLATION") + theme_bw()
+p2 <- filter(lpp, variable == "NOISE COMPLAINT") %>% ggplot(aes(x = Age, y = probability, color = Race, linetype = Gender)) + geom_line() + ggtitle("NOISE COMPLAINT") + theme_bw()
+p3 <- filter(lpp, variable == "ID FRAUD") %>% ggplot(aes(x = Age, y = probability, color = Race, linetype = Gender)) + geom_line() + ggtitle("ID FRAUD") + theme_bw()
+p4<- filter(lpp, variable == "ASSAULT") %>% ggplot(aes(x = Age, y = probability, color = Race, linetype = Gender)) + geom_line() + ggtitle("ASSAULT") + theme_bw()
+p5 <- filter(lpp, variable == "LIQUOR LAW VIOLATION") %>% ggplot(aes(x = Age, y = probability, color = Race, linetype = Gender)) + geom_line() + ggtitle("LIQUOR LAW VIOLATION") + theme_bw()
+p6<-filter(lpp, variable == "PANHANDLING") %>% ggplot(aes(x = Age, y = probability, color = Race, linetype = Gender)) + geom_line() + ggtitle("PANHANDLING") + theme_bw()
+
+```
+
+```{r,fig.width = 10,fig.height=3,warning=FALSE, echo=FALSE}
+figure7 <- multi_panel_figure(columns = 2, rows = 1, panel_label_type = "none")
+
+figure7 %<>%
+  fill_panel(p1, column = 1, row = 1) %<>%
+  fill_panel(p2, column = 2, row = 1) 
+figure7
+par(figure7)
+```
+
+```{r,fig.width = 10,fig.height=3,warning=FALSE, echo=FALSE}
+figure8 <- multi_panel_figure(columns = 2, rows = 1, panel_label_type = "none")
+figure8 %<>%
+ fill_panel(p3, column = 1, row = 1) %<>%
+  fill_panel(p4, column = 2, row = 1) 
+figure8
+```
+
+```{r,fig.width = 10,fig.height=3,warning=FALSE, echo=FALSE}
+figure9 <- multi_panel_figure(columns = 2, rows = 1, panel_label_type = "none")
+figure9 %<>%
+ fill_panel(p5, column = 1, row = 1) %<>%
+  fill_panel(p6, column = 2, row = 1) 
+figure9
+```
+
+
+```{r,fig.width = 25,fig.height=7, warning=FALSE, echo=FALSE,eval=FALSE}
+figure8 <- multi_panel_figure(columns = 3, rows = 1, panel_label_type = "none")
+figure8 %<>%
+  fill_panel(p4, column = 1, row = 1) %<>%
+  fill_panel(p5, column = 2, row = 1) %<>%
+  fill_panel(p6, column = 3, row = 1) 
+figure8
+```
+Looking at the above six charts overall, we can see that for any given age, the probability that an arrested person is arrested for an arrest category is dependent upon the combination of the person's race and gender. If we consider the assault category, for example, we see that for any age, arrested black females have a greater probability of being arrested for assault than do white females, who in turn have a greater probability than black males. Finally, black males have a greater probability than white males. This trend is reflected in the relative position of the four curves in each chart. Secondly, we can see that for a given combination of race and gender, the probability that an arrested person belonging to this demographic is arrested for a given arrest category varies with the person's age. Returning to the assault example, the probability that an arrested person is arrested for assault increases until around age 30, after which point the probability decreases. This trend is reflected in the slope and curvature of the curves in the charts.
+
+The results depicted in the above charts are telling. First, the model gives black arrestees a larger probability of being arrested for drug and narcotic violations than white arrestees, and male arrestees a larger probability than female arrestees. Moreover, for all four groups, the probabilities decrease with age at a decreasing rate. We can conclude that young arrestees are more likely to be arrested for drug and narcotic violations than older arrestees. This result is not surprising, as many people believe the notion that illegal drug activity is more highly concentrated in the younger population.
+
+Moving on to noise complaints, we see higher predicted probabilities for white people than black people and for males than females. However, the most interesting aspect of this chart is the disparity in probability between the ages. For all four groups, the probability starts comparatively high and then converges to zero with age. This outcome suggests that noise complaints are largely centralized within the younger population and are rare in older populations, an unsurprising outcome given the category's association with loud parties thrown by college students.
+
+The probability trends for ID fraud are similar to those for noise complaints, except that female arrestees have higher probabilities of being arrested for ID fraud than do male arrestees. However, the descent to the asymptotic limit is even more rapid in this case than in the noise complaint case. Once again, this result is not surprising, as ID fraud is associated with those under the age of 21.
+
+The trends for assault were discussed above, but the difference between the curves for this category and those for the other categories is that the assault probability curves first rise and then fall, suggesting that assaults are more common in an intermediate age range than in the very young or very old.
+
+For liquor law violations, we see that the probability that a white arrested person is arrested for a liquor law violation is much larger than that of a black arrested person. Moreover, the probability is greater for males than females. Perhaps surprisingly, however, the probabilities increase with age, albeit at a decreasing rate. It could be assumed that liquor law violations would be associated with young people, particularly college students, who are apt to procure and consume alcohol illegally. However, according to the model, this assumption does not appear to be the case. Instead, liquor law violations appear more associated with older people. Although this result appears to stand in opposition to the result depicted in the histogram shown earlier, the two displays are compatible. Although the highest counts of liquor law arrestees occurred in people under the age of 25, the fact that many people in this age group were represented in the dataset suggests that the second, smaller mode in the histogram, a unique feature, played an integral role in the model's predicted probabilities.
+
+Finally, we consider panhandling, for which the model gave black arrestees and male arrestees larger probabilities. As expected from the histogram and from observation, the probabilities increase at an increasing rate with age. Many older people are seen panhandling, and the model conforms with this observation.
+
+In summary, to answer the third question, through a combination of histogram and multinomial logistic regression analysis, we were able to determine a number of interesting associations between the demographic information of an arrested individual and the category for which the person was arrested. Overall, black and white people were arrested in roughly equal number, with a much smaller number of Asian people arrested, and males were arrested much more frequently than females. The distribution of ages represented in the arrest dataset is skewed toward the younger side, which is not alarming in a college town like Chapel Hill. Moreover, many arrest categories, like drug and narcotic violations, driving violations, assaults, and noise complaints reflect the overall age distribution, while liquor law violations also see a spike in arrests around age 50. The distribution of the ages for panhandling arrestees, however, is much different, being extremely sparse among the college-aged and young population and more prevalent around age 50. Finally, the results of the multinomial logistic modeling tell us that black arrestees are more likely to be arrested for drug and narcotic violations, assault, and panhandling than white arrestees, who are more likely than black arrestees to be arrested for noise complaints, ID fraud, and liquor law violations. Similarly, males are more likely to be arrested than females for drug and narcotic violations, noise complaints, liquor law violations, and panhandling, while the reverse is true for ID fraud and assault. In addition, the probability that an arrested person is arrested for a liquor law violation or for panhandling increases with age, while the probabilities for drug and narcotic violations, noise complaints, and ID fraud decrease with age. The probability for assault first increases and then decreases with age.
+
+#### Question 4
+
+***Are there areas in Chapel Hill that are more prone to arrests than others? If so, could these areas be classified into distinct clusters?***
+
+Using the latitude and longitude data available for each arrest in the dataset, we were able to plot the location of each arrest. In conjunction with plotting the locations, we ran a clustering algorithm to determine clusters of arrest hotspots. Below is the result of the clustering algorithm, which depicts the geographic location of each arrest and separates the arrests into two clusters, as determined by the algorithm. A plain map is also included.
+
+```{r, message=FALSE, echo=FALSE}
+  haversine <- function(lat1, lat2, long1, long2){
+    h <- sin(.5 * (lat2 - lat1)) ^ 2 + cos(lat1) * cos(lat2) * (sin(.5 * (long2 - long1)) ^ 2)
+    r <- (12756 / 2) * 0.621371
+    return(2 * r * asin(sqrt(h)))
+  }
+
+  CH = get_stamenmap(bbox = c(left = -79.1, right = -78.98, bottom = 35.875, top = 35.975), zoom = 14, maptype = "terrain")
+```
+
+```{r, message=FALSE}
+  df.CH = filter(arrests.1, Longitude >= -79.1 & Longitude <= -78.98 & Latitude >= 35.875 & Latitude <= 35.975) %>%
+        mutate(Latitude = pi*Latitude/180, Longitude = pi*Longitude/180) %>%
+          select(Longitude, Latitude)
+  
+  d.CH <- function(x, y){
+    haversine(x[1], y[1], x[2], y[2])
+  }
+  
+  dMat.CH = proxy::dist(df.CH, d.CH)
+
+  
+  p.CH.2 = pam(dMat.CH, 2)
+  
+  df.CH.2 = filter(arrests.1, Longitude >= -79.1 & Longitude <= -78.98 & Latitude >= 35.875 & Latitude <= 35.975) %>%
+          mutate(cluster = p.CH.2$clustering) %>%
+            mutate(cluster = factor(cluster))
+```
+
+```{r, message=FALSE, echo=FALSE}
+  ggmap(CH) + geom_point(data = df.CH.2, aes(x = Longitude, y = Latitude, color = cluster), alpha = 0.25) + ggtitle("Arrests around Chapel Hill from 2010 to 2019") + xlab("Longitude") + ylab("Latitude")
+```
+
+
+```{r, echo=FALSE}
+map <- readJPEG("map.jpg")
+grid.raster(map)
+```
+
+Without considering the clustering groups, it is first evident that arrests are not uniformly distributed within the town limits of Chapel Hill. Instead, a large cluster of arrests is located in the lower left area of the map above, an area which corresponds to the UNC campus and the immediate vicinity. This cluster is unsurprising, as UNC is the hub of activity within Chapel Hill, and it is also a dense population center. Another area with a large density of arrests appears in the right half of the map, stretching along the length of Fordham Boulevard, a major roadway in Chapel Hill. Similarly, arrests appear straddled on the left half of the map in a north-south stretch, which corresponds to Martin Luther King Jr. Boulevard, another major roadway. Meanwhile, very few arrests are located to the west of Martin Luther King Jr. Boulevard, an unpopulated and forested area.
+
+The specific clustering algorithm used above was the K-medoids algorithm. The associated distance function used with this algorithm was the Haversine distance, which computes the distance between two points on a sphere along the sphere. Because the points used with the Haversine function were latitude and longitude coordinates, and because the Earth's shape is roughly spherical, the use of this distance function was appropriate. Furthermore, the algorithm was performed with a K value of 2, indicating the creation of two clusters. The justification for this number of clusters, which is the optimal number, is explained below. After running the algorithm, we can see that the arrests were largely separated along a line running from north to south in the middle of Chapel Hill. This separation, and not some other separation along a different line, was the optimal separation per the algorithm, indicating that a natural divider separating the west of town from the east is more appropriate than, for example, separating the north of town from the south. In this way, the primary partition for arrests in Chapel Hill is the one separating the west from the east.
+
+The optimal value for K was determined by performing a K-medoids algorithm for varying values of K. For each value, the average silhouette width for all observations was calculated. Because a higher silhouette width value corresponds to observations being well-matched to their own cluster and poorly matched to neighboring clusters, higher silhouette widths indicate that the number of clusters chosen is appropriate. The following graph depicts the mean silhouette width for each of ten values for K.
+
+```{r, echo=FALSE}
+  factoextra::fviz_nbclust(df.CH, cluster::clara, diss = dMat.CH, method = "silhouette")
+```
+
+From the above graph, we can see that two clusters (K = 2) yields the highest average silhouette width for all arrest observations, so this number of clusters is optimal.
+
+# Conclusion
+
+In this report, the findings of the analysis of the Chapel Hill Police Department arrest records from January 1, 2010 until August 26, 2019 were discussed. We attempted to analyze the records in four respects: temporally through the years, temporally throughout the course of the calendar year, demographically, and geographically. This analysis was conducted with the goal of discovering trends within the arrest records for the previous decade, as well as to gain insight into arrests moving into the future. Hopefully, the above results will be useful for the Chapel Hill Police Department in considering the nature of the arrests in the town and for Chapel Hill residents at large to learn about the arrests that take place in their hometown.
